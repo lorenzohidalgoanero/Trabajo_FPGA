@@ -1,18 +1,11 @@
--- ENTIDAD TOP
-
-library IEEE;
-use IEEE.STD_LOGIC_1164.ALL;
-
--- Uncomment the following library declaration if using
--- arithmetic functions with Signed or Unsigned values
---use IEEE.NUMERIC_STD.ALL;
-
--- Uncomment the following library declaration if instantiating
--- any Xilinx leaf cells in this code.
---library UNISIM;
---use UNISIM.VComponents.all;
-
 entity TOP is
+generic (
+        Monedas : POSITIVE := 4;   -- genérico con valor por defecto 4
+        NUM_PRODUCTOS : POSITIVE := 9;   -- genérico con valor por defecto 9
+        NUM_DIGITS    : positive := 8;
+        NUM_SEGS      : positive := 7
+    );
+
 Port (     button_confir: in STD_LOGIC; --Confirmación de pedido
            button_10: in STD_LOGIC; --Moneda 10 cents
            button_20: in STD_LOGIC;--Moneda 20 cents
@@ -22,41 +15,68 @@ Port (     button_confir: in STD_LOGIC; --Confirmación de pedido
            
            CLK    : in std_logic;
            RST    : in STD_LOGIC;
-           
-           digselec: out std_logic_vector(1 downto 0);   --Display del selector de producto
-           digcont : out STD_LOGIC_VECTOR (3 downto 0);  -- Display del contador
-           digneg: out STD_LOGIC_VECTOR (1 downto 0);    --Mantener apagado el display
-           segment : out STD_LOGIC_VECTOR (6 downto 0);  --Los segmentos del display de los números
+           dig_neg : out std_logic_vector(1 downto 0);
+           digselec      : out std_logic_vector(NUM_DIGITS-1 downto 0);
+           segment       : out STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+           dospuntos : out std_logic;
            Err : out STD_LOGIC_VECTOR (15 downto 0)
            );
 end TOP;
 
 architecture Behavioral of TOP is
+    
+    signal clk_out : std_logic;
+    
     signal sync: std_logic;
     signal edge: std_logic;
     signal rst_s: std_logic;
     --signal scode: std_logic_vector(3 downto 0); --Variable para el contador
-    signal disp1 : std_logic_vector(6 downto 0);  -- display 1 (led_1)
-    signal disp2 : std_logic_vector(6 downto 0);  -- display 2 (led_2)
-    signal clk_out : std_logic;
+    --signal disp1 : std_logic_vector(6 downto 0);  -- display 1 (led_1)
+    --signal disp2 : std_logic_vector(6 downto 0);  -- display 2 (led_2)
     
-    COMPONENT decoder 
-PORT (         
-           switches : in STD_LOGIC_VECTOR (8 downto 0);
-           led_1: out STD_LOGIC_VECTOR (6 downto 0);
-           led_2:out STD_LOGIC_VECTOR (6 downto 0)
-     ); 
-  END COMPONENT;
+    signal DISP_DIG1_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    signal DISP_DIG2_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    signal DISP_DIG3_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    signal DISP_DIG4_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    signal DISP_DIG5_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    signal DISP_DIG6_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    signal DISP_DIG7_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    signal DISP_DIG8_s    : std_logic_vector(NUM_SEGS-1 downto 0);
+    
+    signal estado_s       : std_logic_vector(2 downto 0);
+    signal faltan_monedas_s : std_logic_vector(3 downto 0);
+    
+    signal dig_sel_sinc: STD_LOGIC_VECTOR (8 downto 0); --Vector de los switches síncrono
+    
+--    COMPONENT decoder 
+--    PORT (         
+--           switches : in STD_LOGIC_VECTOR (8 downto 0);
+--           led_1: out STD_LOGIC_VECTOR (6 downto 0);
+--           led_2:out STD_LOGIC_VECTOR (6 downto 0)
+--     ); 
+--  END COMPONENT;
   
-  COMPONENT Multiplex
-    Port (
-        clk      : in  STD_LOGIC;
-        disp1_mult    : in  STD_LOGIC_VECTOR(6 downto 0);
-        disp2_mult    : in  STD_LOGIC_VECTOR(6 downto 0);
-        segment_mult  : out STD_LOGIC_VECTOR(6 downto 0);
-        digselec_mult : out STD_LOGIC_VECTOR(1 downto 0)
-    );
-END COMPONENT;
+  component Multiplex is
+        generic (
+            NUM_DIGITS : positive := 8;
+            NUM_SEGS   : positive := 7
+        );
+        port (
+            clk           : in  STD_LOGIC;
+
+            DISP_DIG1     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            DISP_DIG2     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            DISP_DIG3     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            DISP_DIG4     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            DISP_DIG5     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            DISP_DIG6     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            DISP_DIG7     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            DISP_DIG8     : in  STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+
+            segment_mult  : out STD_LOGIC_VECTOR(NUM_SEGS-1 downto 0);
+            digselec_mult : out STD_LOGIC_VECTOR(NUM_DIGITS-1 downto 0)
+        );
+    end component;
 
 COMPONENT Prescaler
 port(
@@ -65,24 +85,47 @@ port(
         clk_out : out std_logic    -- 16 kHz
     );
 END COMPONENT;
+
+ COMPONENT Sincronizador
+ Generic(
+        NUM_PRODUCTOS: POSITIVE
+        --NUM_MONEDAS: POSITIVE      
+    );
+ port(
+        CLK: in std_logic;
+
+        AS_PRODUCTOS: in std_logic_vector (NUM_PRODUCTOS - 1 downto 0);
+       -- AS_MONEDAS: in std_logic_vector (NUM_MONEDAS - 1 downto 0); 
+               
+        S_PRODUCTOS: out std_logic_vector (NUM_PRODUCTOS - 1 downto 0)
+        --S_MONEDAS: out std_logic_vector (NUM_MONEDAS - 1 downto 0)
+    ); 
+ END COMPONENT;
+
+component ctr_display is
+        generic(
+            NUM_SEGS : positive := 7
+        );
+        port(
+            estado         : in  std_logic_vector(2 downto 0);
+            productos      : in  std_logic_vector(8 downto 0);
+            faltan_monedas : in  std_logic_vector(3 downto 0);
+
+            DISP_DIG1      : out std_logic_vector(NUM_SEGS-1 downto 0);
+            DISP_DIG2      : out std_logic_vector(NUM_SEGS-1 downto 0);
+            DISP_DIG3      : out std_logic_vector(NUM_SEGS-1 downto 0);
+            DISP_DIG4      : out std_logic_vector(NUM_SEGS-1 downto 0);
+            DISP_DIG5      : out std_logic_vector(NUM_SEGS-1 downto 0);
+            DISP_DIG6      : out std_logic_vector(NUM_SEGS-1 downto 0);
+            DISP_DIG7      : out std_logic_vector(NUM_SEGS-1 downto 0);
+            DISP_DIG8      : out std_logic_vector(NUM_SEGS-1 downto 0)
+        );
+    end component;
+
+
+
     
 begin
-
-Inst_Decoder : decoder
-port map(
-    switches => digsel,
-    led_1 => disp1,   -- display selector 1
-    led_2 => disp2    -- display selector 2
-);
-
-Inst_Multi : Multiplex
-port map (
-    clk           => clk_out,
-    disp1_mult    => disp1,
-    disp2_mult    => disp2,
-    segment_mult  => segment,
-    digselec_mult => digselec
-);
 
 Inst_Prescaler : Prescaler
     port map(
@@ -91,7 +134,83 @@ Inst_Prescaler : Prescaler
         clk_out => clk_out
     );
 
-digneg <= "11";--Apagar el display
+-- Inst_Decoder : decoder
+-- port map(
+--    switches => dig_sel_sinc,
+--    led_1 => DISP_DIG1_s,   -- display selector 1
+--    led_2 => DISP_DIG2_s    -- display selector 2
+--);
+
+Inst_Sincronizador : Sincronizador
+    GENERIC MAP(
+    NUM_PRODUCTOS => NUM_PRODUCTOS
+    --NUM_MONEDAS => NUM_MONEDAS
+    )
+      
+     port map(
+        clk => clk_out,
+        AS_PRODUCTOS  => digsel,
+        --AS_MONEDAS    => rst,
+        S_PRODUCTOS => dig_sel_sinc
+        --S_MONEDAS => clk_out
+    );
+    
+    
+    
+    
+    Inst_CTR_Display : ctr_display
+        generic map(
+            NUM_SEGS => NUM_SEGS
+        )
+        port map(
+            estado          => estado_s,
+            productos       => dig_sel_sinc,
+            faltan_monedas  => faltan_monedas_s,
+
+            DISP_DIG1       => DISP_DIG1_s,
+            DISP_DIG2       => DISP_DIG2_s,
+            DISP_DIG3       => DISP_DIG3_s,
+            DISP_DIG4       => DISP_DIG4_s,
+            DISP_DIG5       => DISP_DIG5_s,
+            DISP_DIG6       => DISP_DIG6_s,
+            DISP_DIG7       => DISP_DIG7_s,
+            DISP_DIG8       => DISP_DIG8_s
+        );
+        
+        
+Inst_Multi : Multiplex
+        generic map(
+            NUM_DIGITS => NUM_DIGITS,
+            NUM_SEGS   => NUM_SEGS
+        )
+        port map(
+            clk           => clk_out,
+
+            DISP_DIG1     => DISP_DIG1_s,
+            DISP_DIG2     => DISP_DIG2_s,
+            DISP_DIG3     => DISP_DIG3_s,
+            DISP_DIG4     => DISP_DIG4_s,
+            DISP_DIG5     => DISP_DIG5_s,
+            DISP_DIG6     => DISP_DIG6_s,
+            DISP_DIG7     => DISP_DIG7_s,
+            DISP_DIG8     => DISP_DIG8_s,
+
+            segment_mult  => segment,
+            digselec_mult => digselec
+        );
+
+
+
+    
+ 
+       
+dig_neg <= (others => '1');
 Err <= (others => '1');
+
+dospuntos  <= '0';
+estado_s <= "000";
+faltan_monedas_s <= (others => '0');
+    
+    
     
 end Behavioral;
